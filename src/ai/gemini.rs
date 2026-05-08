@@ -243,12 +243,26 @@ impl GeminiClient {
         }
     }
 
+    fn is_llama_api_key(api_key: &str) -> bool {
+        api_key.starts_with("LLM|")
+    }
+
     fn create_http_client(api_key: &str) -> Client {
         let mut headers = reqwest::header::HeaderMap::new();
-        if !api_key.is_empty()
-            && let Ok(value) = reqwest::header::HeaderValue::from_str(api_key)
-        {
-            headers.insert("x-goog-api-key", value);
+        if !api_key.is_empty() {
+            let is_llama = Self::is_llama_api_key(api_key);
+            let header_value = if is_llama {
+                format!("Bearer {}", api_key)
+            } else {
+                api_key.to_string()
+            };
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&header_value) {
+                if is_llama {
+                    headers.insert(reqwest::header::AUTHORIZATION, value);
+                } else {
+                    headers.insert("x-goog-api-key", value);
+                }
+            }
         }
 
         reqwest::Client::builder()
@@ -277,9 +291,14 @@ impl GeminiClient {
     ) -> Result<GenerateContentResponse> {
         tracing::info!("Sending Gemini request...");
 
+        let api_version = if Self::is_llama_api_key(&self.api_key) {
+            "v1"
+        } else {
+            "v1beta"
+        };
         let url = format!(
-            "{}/v1beta/models/{}:generateContent",
-            self.base_url, self.model
+            "{}/{}/models/{}:generateContent",
+            self.base_url, api_version, self.model
         );
         self.post_request(&url, request).await
     }
